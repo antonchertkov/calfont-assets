@@ -265,6 +265,7 @@ CF.init = function() {
   let dragging = null, resizing = null, dragOffY = 0;
   let isCreating = false, createY0 = 0, createX0 = 0;
   let p5ref  = null;
+  let canvasEl = null; // raw DOM canvas element, set in p.setup
   let _exportFormat = 'png';
 
   // ── Palette helpers ────────────────────────────────────────
@@ -991,17 +992,18 @@ CF.init = function() {
       placeholderBlocks.forEach(b => {
         const x=colToX(b.d), y=hourToY(b._renderS??b.s), h=(b._renderE??b.e)-(b._renderS??b.s);
         const rh=h*hh(), rw=dw()-10*zoom;
-        p.push(); p.drawingContext.globalAlpha=0.30;
-        p.fill(BGr,BGg,BGb,0); p.stroke(150); p.strokeWeight(1);
+        p.push();
+        // Semi-transparent grey fill
+        p.fill(11,11,11,28); p.stroke(11,11,11,60); p.strokeWeight(1);
         p.rect(x,y,rw,rh,C.blockRadius*zoom);
-        p.drawingContext.globalAlpha=1.0;
-        p.noStroke(); p.fill(11,11,11,120);
-        p.textFont('DM Sans,sans-serif'); p.textSize(9); p.textAlign(p.CENTER,p.TOP);
-        const cx=x+rw/2, cy=y+rh/2-12;
-        p.text(b.char,cx,cy);
-        p.fill(11,11,11,80); p.textSize(8);
-        p.text('Build this glyph',cx,cy+11);
-        p.text('in Make mode first',cx,cy+21);
+        // Text
+        p.noStroke();
+        p.textFont('DM Sans,sans-serif'); p.textSize(9*zoom); p.textAlign(p.CENTER,p.TOP);
+        const cx=x+rw/2, cy=y+rh/2-12*zoom;
+        p.fill(11,11,11,160); p.text(b.char,cx,cy);
+        p.fill(11,11,11,90); p.textSize(8*zoom);
+        p.text('Build this glyph',cx,cy+11*zoom);
+        p.text('in Make mode first',cx,cy+21*zoom);
         p.pop();
       });
     }
@@ -1011,6 +1013,7 @@ CF.init = function() {
       CW = wrap.offsetWidth; CH = wrap.offsetHeight;
       const cnv = p.createCanvas(CW, CH);
       cnv.parent(C.canvasContainerId);
+      canvasEl = cnv.elt; // cache DOM element for cursor control
       // Right-click on a block deletes it; suppress browser context menu
       cnv.elt.addEventListener('contextmenu', function(e) {
         e.preventDefault();
@@ -1092,29 +1095,59 @@ CF.init = function() {
         }
       }
       drawPlaceholders();
+
+      // ── Cursor feedback & nub highlight ──────────────────────────
+      if (!isTypeMode && !dragging && !resizing && !isCreating) {
+        const sorted=[...blocks].filter(b=>b.renderW!=null).sort((a,b)=>(b.renderX||0)-(a.renderX||0));
+        let cursor='crosshair'; // default: drawing mode
+        let nubHoverBlock=null;
+        let bodyHoverBlock=null;
+        for (const b of sorted) {
+          const nubY=b.renderY+b.renderH;
+          if (p.mouseX>=b.renderX&&p.mouseX<=b.renderX+b.renderW&&p.mouseY>=nubY-10*zoom&&p.mouseY<=nubY+6*zoom) {
+            nubHoverBlock=b; cursor='ns-resize'; break;
+          }
+          if (p.mouseX>=b.renderX&&p.mouseX<=b.renderX+b.renderW&&p.mouseY>=b.renderY&&p.mouseY<=b.renderY+b.renderH) {
+            bodyHoverBlock=b; cursor='grab'; break;
+          }
+        }
+        // Highlight hovered nub
+        if (nubHoverBlock) {
+          const nb=nubHoverBlock;
+          const nubW=nb.renderW*0.38, nubH=3*zoom;
+          const nx=nb.renderX+(nb.renderW-nubW)/2, ny=nb.renderY+nb.renderH-nubH*2;
+          p.noStroke(); p.fill(11,11,11,120);
+          p.rect(nx,ny,nubW,nubH*1.6,nubH*0.5);
+        }
+        if(canvasEl) canvasEl.style.cursor=cursor;
+      } else if (dragging) {
+        if(canvasEl) canvasEl.style.cursor='grabbing';
+      } else if (resizing) {
+        if(canvasEl) canvasEl.style.cursor='ns-resize';
+      } else if (isCreating) {
+        if(canvasEl) canvasEl.style.cursor='crosshair';
+      }
     };
 
     p.mousePressed = function() {
       if (document.querySelector('.cf-modal-open')) return;
       if (isTypeMode) return;
+      // Hit-test in reverse draw order (sorted by renderX descending = topmost visible first)
+      const sorted=[...blocks].filter(b=>b.renderW!=null).sort((a,b)=>(b.renderX||0)-(a.renderX||0));
       // Check resize nub first
-      for (let i=blocks.length-1;i>=0;i--) {
-        const b=blocks[i];
-        if (b.renderW==null) continue;
+      for (const b of sorted) {
         const nubY=b.renderY+b.renderH;
         if (p.mouseX>=b.renderX&&p.mouseX<=b.renderX+b.renderW&&p.mouseY>=nubY-10*zoom&&p.mouseY<=nubY+6*zoom) {
           resizing=b; dragOffY=p.mouseY-hourToY(b.e); return;
         }
       }
-      // Check drag
-      for (let i=blocks.length-1;i>=0;i--) {
-        const b=blocks[i];
-        if (b.renderW==null) continue;
+      // Check drag body
+      for (const b of sorted) {
         if (p.mouseX>=b.renderX&&p.mouseX<=b.renderX+b.renderW&&p.mouseY>=b.renderY&&p.mouseY<=b.renderY+b.renderH) {
           dragging=b; dragOffY=p.mouseY-hourToY(b.s); return;
         }
       }
-      // Create new block
+      // Nothing hit — create new block
       isCreating=true; createY0=p.mouseY; createX0=p.mouseX;
     };
 
