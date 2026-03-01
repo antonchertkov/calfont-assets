@@ -397,21 +397,27 @@ CF.init = function() {
   }
 
   function updateModePillColor(color) {
-    qa(H.btnMake + ', ' + H.btnTest).forEach(el => {
+    // Reset both buttons individually (avoids combined ID+class selector issues)
+    const makeEl = q(H.btnMake), testEl = q(H.btnTest);
+    [makeEl, testEl].forEach(el => {
+      if (!el) return;
       el.style.removeProperty('background');
       el.style.removeProperty('color');
       el.style.removeProperty('border-color');
     });
-    const active = q(H.btnMake + '.' + H.activeClass) || q(H.btnTest + '.' + H.activeClass);
+    // Find active button by checking classList directly, not combined selector
+    const active = (makeEl && makeEl.classList.contains(H.activeClass)) ? makeEl
+                 : (testEl && testEl.classList.contains(H.activeClass))  ? testEl
+                 : null;
     if (!active) return;
     if (color) {
-      active.style.background   = color;
-      active.style.color        = BG_COL;
-      active.style.borderColor  = color;
+      active.style.background  = color;
+      active.style.color       = BG_COL;
+      active.style.borderColor = color;
     } else {
-      active.style.background   = '#0B0B0B';
-      active.style.color        = BG_COL;
-      active.style.borderColor  = '#0B0B0B';
+      active.style.background  = '#0B0B0B';
+      active.style.color       = BG_COL;
+      active.style.borderColor = '#0B0B0B';
     }
   }
 
@@ -421,8 +427,9 @@ CF.init = function() {
     const keys = Object.keys(rawAlphabet).sort();
     wrap.innerHTML = keys.map(k => {
       const isSingle = [...k].length === 1;
-      const style = isSingle ? 'font-size:26px;font-weight:700;line-height:1;padding:0 8px;' : '';
-      return `<div class="cf-chip" data-glyph="${k.replace(/"/g,'&quot;')}" style="${style}">${k}</div>`;
+      // Single-char glyphs get combo class cf-chip-lg; multi-char stay as plain cf-chip
+      const cls = isSingle ? 'cf-chip cf-chip-lg' : 'cf-chip';
+      return `<div class="${cls}" data-glyph="${k.replace(/"/g,'&quot;')}">${k}</div>`;
     }).join('') || '';
     // Bind chip events
     wrap.querySelectorAll('.cf-chip').forEach(chip => {
@@ -458,7 +465,7 @@ CF.init = function() {
     if (tz) tz.style.display = isTypeMode ? '' : 'none';
     const ab = q(H.addBtn);
     if (ab) ab.style.display = isTypeMode ? 'none' : '';
-    blocks = []; ghostBlocks = []; editingGlyphName = null;
+    blocks = []; ghostBlocks = []; placeholderBlocks = []; editingGlyphName = null;
     const state = getPaletteState();
     updateModePillColor(state.mode !== 'colorful' ? PALETTE[state.palIdx] : null);
     if (isTypeMode) renderTypedText();
@@ -503,7 +510,7 @@ CF.init = function() {
     rawAlphabet[name]._human = humanItems;
     const inp = q(H.nameInput);
     if (inp) inp.value = '';
-    blocks = []; ghostBlocks = []; editingGlyphName = null; pendingOverwriteName = null;
+    blocks = []; ghostBlocks = []; placeholderBlocks = []; editingGlyphName = null; pendingOverwriteName = null;
     rebuildChips(); checkOverwriteMode();
     toast('"' + name + '" saved');
   }
@@ -1004,6 +1011,21 @@ CF.init = function() {
       CW = wrap.offsetWidth; CH = wrap.offsetHeight;
       const cnv = p.createCanvas(CW, CH);
       cnv.parent(C.canvasContainerId);
+      // Right-click on a block deletes it; suppress browser context menu
+      cnv.elt.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        if (isTypeMode) return;
+        // Find topmost block under cursor (iterate reverse for z-order)
+        for (let i=blocks.length-1; i>=0; i--) {
+          const b=blocks[i];
+          if (b.renderW==null) continue;
+          if (e.offsetX>=b.renderX && e.offsetX<=b.renderX+b.renderW &&
+              e.offsetY>=b.renderY && e.offsetY<=b.renderY+b.renderH) {
+            blocks.splice(i,1);
+            return;
+          }
+        }
+      });
       p.textFont('DM Sans, sans-serif');
       positionMidBar();
     };
@@ -1081,7 +1103,7 @@ CF.init = function() {
         if (b.renderW==null) continue;
         const nubY=b.renderY+b.renderH;
         if (p.mouseX>=b.renderX&&p.mouseX<=b.renderX+b.renderW&&p.mouseY>=nubY-10*zoom&&p.mouseY<=nubY+6*zoom) {
-          resizing=b; dragOffY=p.mouseY-b.e; return;
+          resizing=b; dragOffY=p.mouseY-hourToY(b.e); return;
         }
       }
       // Check drag
@@ -1099,7 +1121,7 @@ CF.init = function() {
     p.mouseDragged = function() {
       if (isTypeMode) return;
       if (resizing) {
-        const newE=Math.max(resizing.s+0.25, snapHour(p.mouseY-dragOffY+hh()*0.5));
+        const newE=Math.max(resizing.s+0.25, snapHour(p.mouseY-dragOffY));
         resizing.e=newE; resizing._renderE=newE; return;
       }
       if (dragging) {
@@ -1170,6 +1192,23 @@ CF.init = function() {
     }
     if (e.key==='Escape'&&!isTypeMode) blocks=[];
   });
+
+  // ── Inject input uppercase styles ────────────────────────
+  // Forces typed characters to uppercase while keeping placeholder normal.
+  // Uses a <style> tag so it works regardless of how inputs are styled in Webflow.
+  (function() {
+    const s = document.createElement('style');
+    s.textContent = [
+      H.nameInput + ' { text-transform: uppercase; }',
+      H.typeInput  + ' { text-transform: uppercase; }',
+      // ::placeholder pseudo-element needs separate rules per browser
+      H.nameInput + '::placeholder { text-transform: none; }',
+      H.typeInput  + '::placeholder { text-transform: none; }',
+      H.nameInput + '::-webkit-input-placeholder { text-transform: none; }',
+      H.typeInput  + '::-webkit-input-placeholder { text-transform: none; }',
+    ].join('\n');
+    document.head.appendChild(s);
+  })();
 
   // ── Init ──────────────────────────────────────────────────
   loadPresets();
