@@ -321,24 +321,26 @@ CF.init = function() {
   // ── Glyph helpers ──────────────────────────────────────────
   function humanToRelative(items) {
     if (!items || items.length === 0) return [];
-    const minCol  = Math.min(...items.map(i => i.col));
-    const minHour = Math.min(...items.map(i => fromHHMM(i.from)));
-    const maxHour = Math.max(...items.map(i => fromHHMM(i.to)));
-    const span    = maxHour - minHour || 1;
+    const minCol = Math.min(...items.map(i => i.col));
+    // Store actual hours as relS/relE — no normalisation.
+    // glyphToBlocks uses these directly so proportions are always preserved.
     return items.map(i => ({
       relD: i.col - minCol,
-      relS: (fromHHMM(i.from) - minHour) / span,
-      relE: (fromHHMM(i.to)   - minHour) / span,
+      relS: fromHHMM(i.from),
+      relE: fromHHMM(i.to),
       title: i.title || '', outlined: i.outlined || false
     }));
   }
 
-  function blockToHuman(b, minD, minY, span) {
+  function blockToHuman(b, minD) {
+    // Store actual hours directly — no normalisation into 9-17 window.
+    // This preserves overshoot, ascenders and descenders freely.
     return {
-      col: b.d - minD + 1,
-      from: toHHMM(GLYPH_START + ((b.s - minY) / span) * GLYPH_SPAN),
-      to:   toHHMM(GLYPH_START + ((b.e - minY) / span) * GLYPH_SPAN),
-      title: b.title || '', outlined: b.outlined || false
+      col:   b.d - minD + 1,
+      from:  toHHMM(Math.max(0, b.s)),   // clamp to 00:00 min
+      to:    toHHMM(Math.min(24, b.e)),   // clamp to 24:00 max
+      title: b.title || '',
+      outlined: b.outlined || false
     };
   }
 
@@ -347,22 +349,60 @@ CF.init = function() {
     if (!items.length) return [];
     const glyphCols = Math.max(...items.map(g => g.relD)) + 1;
     const startCol  = Math.ceil((12 - glyphCols) / 2);
+    // relS/relE are now actual hours — use them directly
     return items.map((g, i) => ({
       d: g.relD + startCol,
-      s: GLYPH_START + g.relS * GLYPH_SPAN,
-      e: GLYPH_START + g.relE * GLYPH_SPAN,
+      s: g.relS,
+      e: g.relE,
       outlined: g.outlined || false,
       _colorfulIdx: i,
       title: g.title || randTitle()
     }));
   }
 
+  // ── Tokeniser ─────────────────────────────────────────────
+  // Splits a line string into typed tokens, recognising _name_ multi-glyph syntax.
+  // Returns array of: { type:'named'|'char'|'space', key:string, glyph:array|null }
+  // Named tokens:  _smile_ → looks up rawAlphabet['SMILE']
+  // Char tokens:   single character → looks up rawAlphabet[CHAR]
+  // Space tokens:  space character → no glyph, just advance column
+  function tokeniseLine(line) {
+    const tokens = [];
+    const upper = line.toUpperCase();
+    let i = 0;
+    while (i < upper.length) {
+      // Check for _name_ pattern
+      if (upper[i] === '_') {
+        const close = upper.indexOf('_', i + 1);
+        if (close > i + 1) {
+          const name = upper.slice(i + 1, close);
+          const glyph = rawAlphabet[name];
+          if (glyph) {
+            tokens.push({ type: 'named', key: name, glyph });
+            i = close + 1;
+            continue;
+          }
+          // No glyph found for _name_ — fall through and emit _ as a char
+        }
+      }
+      const ch = upper[i];
+      if (ch === ' ') {
+        tokens.push({ type: 'space', key: ' ', glyph: null });
+      } else {
+        const glyph = rawAlphabet[ch] || rawAlphabet[ch.toLowerCase()] || null;
+        tokens.push({ type: 'char', key: ch, glyph });
+      }
+      i++;
+    }
+    return tokens;
+  }
+
   function lineColWidth(line) {
     let col = 0;
-    for (const char of line.toUpperCase()) {
-      const glyph = rawAlphabet[char] || rawAlphabet[char.toLowerCase()];
-      if (glyph) col += Math.max(...glyph.map(g => g.relD)) + 1;
-      else col += 1;
+    for (const token of tokeniseLine(line)) {
+      if (token.type === 'space') { col += 1; continue; }
+      if (token.glyph) col += Math.max(...token.glyph.map(g => g.relD)) + 1;
+      else col += 1; // unknown char or unsaved named glyph = 1 col placeholder
     }
     return col;
   }
@@ -503,10 +543,7 @@ CF.init = function() {
 
   function commitSaveGlyph(name) {
     const minD = Math.min(...blocks.map(b => b.d));
-    const minY = Math.min(...blocks.map(b => b.s));
-    const maxY = Math.max(...blocks.map(b => b.e));
-    const span = maxY - minY || 1;
-    const humanItems = blocks.map(b => blockToHuman(b, minD, minY, span));
+    const humanItems = blocks.map(b => blockToHuman(b, minD));
     rawAlphabet[name] = humanToRelative(humanItems);
     rawAlphabet[name]._human = humanItems;
     const inp = q(H.nameInput);
@@ -519,9 +556,7 @@ CF.init = function() {
   function buildCurrentGlyphDef() {
     if (!blocks.length) return [];
     const minD = Math.min(...blocks.map(b => b.d));
-    const minY = Math.min(...blocks.map(b => b.s));
-    const span = (Math.max(...blocks.map(b => b.e)) - minY) || 1;
-    return humanToRelative(blocks.map(b => blockToHuman(b, minD, minY, span)));
+    return humanToRelative(blocks.map(b => blockToHuman(b, minD)));
   }
 
   function chipRightClick(name) {
@@ -544,20 +579,33 @@ CF.init = function() {
     const canvas = typeof sel === 'string' ? q(sel) : sel;
     if (!canvas || !glyphDef || !glyphDef.length) return;
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H2 = canvas.height, PAD = 10;
+    const W = canvas.width, H2 = canvas.height, PAD = 12;
     ctx.clearRect(0, 0, W, H2);
     ctx.fillStyle = '#2a2a2a'; ctx.fillRect(0, 0, W, H2);
+
     const items = glyphDef.filter(g => g.relD !== undefined);
     if (!items.length) return;
-    const maxD = Math.max(...items.map(g => g.relD));
-    const cols = maxD + 1;
-    const availW = W - PAD * 2, availH = H2 - PAD * 2;
-    const colW = availW / cols;
+
+    // Normalise hours to 0-1 within the glyph bounding box for layout
+    const minHr  = Math.min(...items.map(g => g.relS));
+    const maxHr  = Math.max(...items.map(g => g.relE));
+    const hrSpan = maxHr - minHr || 1;
+
+    const maxD   = Math.max(...items.map(g => g.relD));
+    const cols   = maxD + 1;
+    const availW = W - PAD * 2;
+    const availH = H2 - PAD * 2;
+    const colW   = availW / cols;
     const COL_MARGIN = colW * 0.065;
     const fullCol = colW - COL_MARGIN;
 
-    function physicsForCol(colItems, colX) {
-      colItems.sort((a, b) => a.relS - b.relS);
+    // Fake coordinate helpers matching processPhysics signature
+    function pxY(hr)  { return PAD + ((hr - minHr) / hrSpan) * availH; }
+    function pxH(s,e) { return ((e - s) / hrSpan) * availH; }
+
+    // ── Exact copy of processPhysics logic, operating on preview coords ──
+    function previewPhysicsForCol(colItems, colX) {
+      colItems.sort((a,b) => a.relS - b.relS);
       let lanes = [];
       colItems.forEach(ev => {
         let l = 0;
@@ -565,29 +613,52 @@ CF.init = function() {
         if (!lanes[l]) lanes[l] = [];
         lanes[l].push(ev); ev._lane = l;
       });
+
       colItems.forEach(ev => {
         const conc = colItems.filter(e => ev.relS < e.relE && ev.relE > e.relS && e !== ev);
         let x = 0, w = fullCol;
+
         if (ev._lane === 0) {
-          const h2 = conc.find(e => e._lane===1);
-          if (h2 && h2.relS - ev.relS <= 0.5) w = fullCol * 0.85;
+          const h2 = conc.find(e => e._lane === 1);
+          const h3 = conc.find(e => e._lane === 2);
+          if (h2 && h2.relS - ev.relS <= (0.5/hrSpan)*hrSpan)
+            w = h3 ? fullCol * 0.57 : fullCol * 0.85;
         } else if (ev._lane === 1) {
-          const h1 = conc.find(e => e._lane===0);
-          if (h1 && ev.relS - h1.relS <= 0.5) { x = fullCol * 0.5; w = fullCol * 0.5; }
-          else { x = fullCol * 0.05; }
+          const h1 = conc.find(e => e._lane === 0);
+          const h3 = conc.find(e => e._lane === 2);
+          if (h1 && ev.relS - h1.relS <= (0.5/hrSpan)*hrSpan) {
+            x = fullCol * 0.34; const seg = fullCol - x;
+            if (!h3) { x = fullCol * 0.5; w = fullCol * 0.5; }
+            else w = h3.relS - ev.relS <= (0.5/hrSpan)*hrSpan ? seg * 0.85 : seg;
+          } else {
+            x = fullCol * 0.05;
+            const seg = fullCol - x;
+            w = h3 && h3.relS - ev.relS <= (0.5/hrSpan)*hrSpan ? seg * 0.85 : seg;
+          }
+        } else if (ev._lane === 2) {
+          const h2 = conc.find(e => e._lane === 1);
+          if (h2) {
+            const h2x = h2._px - colX;
+            x = ev.relS - h2.relS <= (0.5/hrSpan)*hrSpan
+              ? h2x + (fullCol - h2x) * 0.5
+              : h2x + (fullCol - h2x) * 0.05;
+            w = fullCol - x;
+          }
         }
-        ev._px = colX + x; ev._py = PAD + ev.relS * availH;
-        ev._pw = w;        ev._ph = (ev.relE - ev.relS) * availH;
+
+        ev._px = colX + x;
+        ev._py = pxY(ev.relS);
+        ev._pw = w;
+        ev._ph = pxH(ev.relS, ev.relE);
       });
     }
 
     for (let d = 0; d <= maxD; d++) {
       const colItems = items.filter(g => g.relD === d);
-      if (colItems.length) physicsForCol(colItems, PAD + d * colW);
+      if (colItems.length) previewPhysicsForCol(colItems, PAD + d * colW);
     }
 
     const sorted = [...items].sort((a,b) => (a._px||0) - (b._px||0));
-    const state = getPaletteState();
     sorted.forEach(b => {
       const col = blockColor(b);
       const r = 3;
@@ -639,16 +710,24 @@ CF.init = function() {
       const offset = Math.ceil((maxCols - lineWidths[li]) / 2);
       let col = offset;
       const timeOff = firstLineStart + li * (LINE_HRS + LINE_GAP);
-      for (const char of line) {
-        const glyph = rawAlphabet[char] || rawAlphabet[char.toLowerCase()];
-        if (glyph) {
+      for (const token of tokeniseLine(line)) {
+        const glyph = token.glyph;
+        if (token.type === 'space') {
+          col += 1;
+        } else if (glyph) {
+          // Glyph hours are absolute — shift so glyph midpoint lands on line midpoint
+          const glyphMin = Math.min(...glyph.map(g => g.relS));
+          const glyphMax = Math.max(...glyph.map(g => g.relE));
+          const glyphMid = (glyphMin + glyphMax) / 2;
+          const lineMid  = timeOff + LINE_HRS / 2;
+          const shift    = lineMid - glyphMid;
           glyph.forEach(g => {
             const b = {
               d: col + g.relD,
-              s: GLYPH_START + g.relS * LINE_HRS,
-              e: GLYPH_START + g.relE * LINE_HRS,
-              _renderS: timeOff + g.relS * LINE_HRS,
-              _renderE: timeOff + g.relE * LINE_HRS,
+              s: g.relS,
+              e: g.relE,
+              _renderS: g.relS + shift,
+              _renderE: g.relE + shift,
               _colorfulIdx: blocks.length,
               outlined: g.outlined || false,
               title: g.title || randTitle(),
@@ -658,11 +737,11 @@ CF.init = function() {
             blocks.push(b);
           });
           col += Math.max(...glyph.map(g => g.relD)) + 1;
-        } else if (char === ' ') {
-          col += 1;
         } else {
+          // Unknown char or unrecognised _name_ — show placeholder
           placeholderBlocks.push({ d: col, s: timeOff, e: timeOff + LINE_HRS,
-            _renderS: timeOff, _renderE: timeOff + LINE_HRS, char, isPlaceholder: true });
+            _renderS: timeOff, _renderE: timeOff + LINE_HRS,
+            char: token.key, isPlaceholder: true });
           col += 1;
         }
       }
@@ -870,7 +949,7 @@ CF.init = function() {
     function hourToY(h) { return originY()+(h-HOUR_S)*hh(); }
     function xToCol(x)  { return Math.floor((x-originX())/dw()); }
     function yToHour(y) { return (y-originY())/hh()+HOUR_S; }
-    function snapHour(y){ return Math.round(yToHour(y)*4)/4; }
+    function snapHour(y){ return Math.max(0, Math.min(24, Math.round(yToHour(y)*4)/4)); }
 
     function processPhysics(events, dayX) {
       events.sort((a,b)=>(a._renderS??a.s)-(b._renderS??b.s)||blocks.indexOf(a)-blocks.indexOf(b));
@@ -1154,12 +1233,15 @@ CF.init = function() {
     p.mouseDragged = function() {
       if (isTypeMode) return;
       if (resizing) {
-        const newE=Math.max(resizing.s+0.25, snapHour(p.mouseY-dragOffY));
+        const newE=Math.max(resizing.s+0.25, Math.min(24, snapHour(p.mouseY-dragOffY)));
         resizing.e=newE; resizing._renderE=newE; return;
       }
       if (dragging) {
-        const newS=snapHour(p.mouseY-dragOffY);
         const dur=dragging.e-dragging.s;
+        let newS=snapHour(p.mouseY-dragOffY);
+        // Clamp so block stays within 0-24
+        if (newS < 0) newS = 0;
+        if (newS + dur > 24) newS = 24 - dur;
         dragging.s=newS; dragging.e=newS+dur;
         dragging._renderS=newS; dragging._renderE=newS+dur;
         dragging.d=xToCol(p.mouseX);
