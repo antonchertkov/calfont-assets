@@ -81,42 +81,7 @@ CF.config = {
   },
 
   // ── Preset glyphs (the default alphabet shipped with the tool) ────────────
-  presetAlphabet: {
-    "H": [
-      {"relD":0,"relS":0.0,"relE":1.0,"outlined":false,"title":"Design Review"},
-      {"relD":0,"relS":0.03125,"relE":0.09375,"outlined":false,"title":"All Hands"},
-      {"relD":0,"relS":0.34375,"relE":0.5625,"outlined":false,"title":"Onboarding"},
-      {"relD":1,"relS":0.28125,"relE":0.53125,"outlined":false,"title":"Roadmap Sync"},
-      {"relD":1,"relS":0.3125,"relE":1.0,"outlined":false,"title":"Standup"},
-      {"relD":1,"relS":0.375,"relE":1.0,"outlined":false,"title":"OKR Review"}
-    ],
-    "E": [
-      {"relD":0,"relS":0.0,"relE":1.0,"outlined":false,"title":"Client Call"},
-      {"relD":1,"relS":0.0,"relE":0.25,"outlined":false,"title":"Onboarding"},
-      {"relD":1,"relS":0.75,"relE":1.0,"outlined":false,"title":"Planning Session"},
-      {"relD":1,"relS":0.4375,"relE":0.59375,"outlined":false,"title":"Retro"},
-      {"relD":0,"relS":0.0,"relE":0.25,"outlined":false,"title":"Apply to 10 Jobs"},
-      {"relD":0,"relS":0.4375,"relE":0.59375,"outlined":false,"title":"Touch Grass"},
-      {"relD":0,"relS":0.75,"relE":1.0,"outlined":false,"title":"Out of Office (Forever)"}
-    ],
-    "L": [
-      {"relD":0,"relS":0.0,"relE":0.75,"outlined":false,"title":"Tech Deep Dive"},
-      {"relD":0,"relS":0.78125,"relE":1.0,"outlined":false,"title":"Standup"},
-      {"relD":1,"relS":0.71875,"relE":1.0,"outlined":false,"title":"Feasibility Workshop"}
-    ],
-    "P": [
-      {"relD":0,"relS":0.0,"relE":1.0,"outlined":false,"title":"Alignment with Steve"},
-      {"relD":0,"relS":0.0,"relE":0.1875,"outlined":false,"title":"Team Introduction"},
-      {"relD":0,"relS":0.40625,"relE":0.59375,"outlined":false,"title":"Retro"},
-      {"relD":1,"relS":0.0,"relE":0.1875,"outlined":false,"title":"Design Review"},
-      {"relD":1,"relS":0.0625,"relE":0.5,"outlined":false,"title":"Team Introduction"},
-      {"relD":1,"relS":0.40625,"relE":0.59375,"outlined":false,"title":"Team Introduction"}
-    ],
-    "!": [
-      {"relD":0,"relS":0.0,"relE":0.65625,"outlined":false,"title":"Feasibility Workshop"},
-      {"relD":0,"relS":0.75,"relE":1.0,"outlined":false,"title":"1:1 with Manager"}
-    ]
-  }
+  presetAlphabet: {}  // populated from calfont-presets.js if loaded, else empty
 
 }; // end CF.config
 
@@ -409,8 +374,11 @@ CF.init = function() {
 
   // ── Presets ────────────────────────────────────────────────
   function loadPresets() {
-    for (const [name, items] of Object.entries(C.presetAlphabet)) {
-      if (!rawAlphabet[name]) rawAlphabet[name] = items;
+    // CF.presets is populated by calfont-presets.js (loaded before this file).
+    // Falls back to C.presetAlphabet if the external file isn't present.
+    const source = (window.CF && window.CF.presets) ? window.CF.presets : C.presetAlphabet;
+    for (const [name, items] of Object.entries(source)) {
+      if (!rawAlphabet[name]) rawAlphabet[name] = humanToRelative(items);
     }
     rebuildChips();
   }
@@ -715,19 +683,15 @@ CF.init = function() {
         if (token.type === 'space') {
           col += 1;
         } else if (glyph) {
-          // Glyph hours are absolute — shift so glyph midpoint lands on line midpoint
-          const glyphMin = Math.min(...glyph.map(g => g.relS));
-          const glyphMax = Math.max(...glyph.map(g => g.relE));
-          const glyphMid = (glyphMin + glyphMax) / 2;
-          const lineMid  = timeOff + LINE_HRS / 2;
-          const shift    = lineMid - glyphMid;
+          // Render glyph at its absolute saved hours — no vertical shifting.
+          // A period saved at 14:30-17:00 renders there, not forced to line center.
           glyph.forEach(g => {
             const b = {
               d: col + g.relD,
               s: g.relS,
               e: g.relE,
-              _renderS: g.relS + shift,
-              _renderE: g.relE + shift,
+              _renderS: g.relS,
+              _renderE: g.relE,
               _colorfulIdx: blocks.length,
               outlined: g.outlined || false,
               title: g.title || randTitle(),
