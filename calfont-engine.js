@@ -1117,9 +1117,31 @@ CF.init = function() {
 
       const minD=blocks.length?Math.min(...blocks.map(b=>b.d)):0;
       const maxD=blocks.length?Math.max(...blocks.map(b=>b.d)):0;
-      for (let d=minD;d<=maxD;d++) {
-        const evts=blocks.filter(b=>b.d===d);
-        if (evts.length) processPhysics(evts,colToX(d));
+      if (isTypeMode) {
+        // In type mode each line is independent — never mix blocks from
+        // different lines in the same processPhysics call.
+        const STRIDE = GLYPH_SPAN * (1 + C.lineGapRatio);
+        for (let d=minD;d<=maxD;d++) {
+          const col = blocks.filter(b=>b.d===d);
+          if (!col.length) continue;
+          const seen = new Set();
+          col.forEach(b => {
+            const li = b._origS != null ? Math.round((b.s - b._origS) / STRIDE) : 0;
+            seen.add(li);
+          });
+          seen.forEach(li => {
+            const evts = col.filter(b => {
+              const bLi = b._origS != null ? Math.round((b.s - b._origS) / STRIDE) : 0;
+              return bLi === li;
+            });
+            if (evts.length) processPhysics(evts, colToX(d));
+          });
+        }
+      } else {
+        for (let d=minD;d<=maxD;d++) {
+          const evts=blocks.filter(b=>b.d===d);
+          if (evts.length) processPhysics(evts,colToX(d));
+        }
       }
       if (!isTypeMode&&ghostBlocks.length) {
         const gMinD=Math.min(...ghostBlocks.map(b=>b.d));
