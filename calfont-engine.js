@@ -665,33 +665,38 @@ CF.init = function() {
     currentTypedText = el ? el.value : currentTypedText;
     blocks = []; placeholderBlocks = [];
     const lines = currentTypedText.toUpperCase().split('\n');
-    const LINE_HRS = GLYPH_SPAN;
-    const LINE_GAP = LINE_HRS * C.lineGapRatio;
-    const nLines = lines.length;
-    const totalHrs = nLines * LINE_HRS + (nLines - 1) * LINE_GAP;
-    const midHr = GLYPH_START + GLYPH_SPAN / 2;
-    const firstLineStart = midHr - totalHrs / 2;
+
+    // Each line is a full 24hr window. Glyphs keep their absolute hours (e.g. 9-17).
+    // Line 0: hours 0-24 (no shift — glyphs render at their saved times).
+    // Line 1: hours 24+GAP to 48+GAP (shift = 24 + GAP).
+    // GAP_HRS = visual space between windows = half a 24hr window = 12hrs.
+    // This means glyphs near the edges of their window can visually bleed
+    // into the adjacent line's space — intentional, they don't physically overlap.
+    const WIN = 24;                        // each line's hour window
+    const GAP_HRS = WIN * C.lineGapRatio;  // gap between windows (default: 12hrs)
+    const STRIDE = WIN + GAP_HRS;          // hours per line stride (default: 36)
+
     const lineWidths = lines.map(l => lineColWidth(l));
     const maxCols = Math.max(...lineWidths, 1);
 
     lines.forEach((line, li) => {
+      const lineShift = li * STRIDE;  // line 0: 0, line 1: 36, line 2: 72 …
       const offset = Math.ceil((maxCols - lineWidths[li]) / 2);
       let col = offset;
-      const timeOff = firstLineStart + li * (LINE_HRS + LINE_GAP);
+
       for (const token of tokeniseLine(line)) {
         const glyph = token.glyph;
         if (token.type === 'space') {
           col += 1;
         } else if (glyph) {
-          // Render glyph at its absolute saved hours — no vertical shifting.
-          // A period saved at 14:30-17:00 renders there, not forced to line center.
+          // Shift glyph into this line's window — absolute hours preserved within window
           glyph.forEach(g => {
             const b = {
               d: col + g.relD,
-              s: g.relS,
-              e: g.relE,
-              _renderS: g.relS,
-              _renderE: g.relE,
+              s: g.relS + lineShift,
+              e: g.relE + lineShift,
+              _renderS: g.relS + lineShift,
+              _renderE: g.relE + lineShift,
               _colorfulIdx: blocks.length,
               outlined: g.outlined || false,
               title: g.title || randTitle(),
@@ -702,10 +707,13 @@ CF.init = function() {
           });
           col += Math.max(...glyph.map(g => g.relD)) + 1;
         } else {
-          // Unknown char or unrecognised _name_ — show placeholder
-          placeholderBlocks.push({ d: col, s: timeOff, e: timeOff + LINE_HRS,
-            _renderS: timeOff, _renderE: timeOff + LINE_HRS,
-            char: token.key, isPlaceholder: true });
+          // Unknown char — placeholder spans 9-17 of this line's window
+          placeholderBlocks.push({
+            d: col,
+            s: GLYPH_START + lineShift, e: GLYPH_END + lineShift,
+            _renderS: GLYPH_START + lineShift, _renderE: GLYPH_END + lineShift,
+            char: token.key, isPlaceholder: true
+          });
           col += 1;
         }
       }
@@ -834,7 +842,7 @@ CF.init = function() {
         ctx.fillStyle=b.outlined?col:BG_COL; ctx.globalAlpha=0.9;
         ctx.beginPath(); ctx.roundRect(x,y,w,h,rad); ctx.clip();
         ctx.fillText(b.title,x+ps,y+pt+fs);
-        if (b.e-b.s>0.5) { ctx.globalAlpha=0.65; ctx.fillText(toHHMM(b.s)+' – '+toHHMM(b.e),x+ps,y+pt+fs*2.35); }
+        if (b.e-b.s>0.5) { ctx.globalAlpha=0.65; const _d1=b.fromType?b.s%24:b.s,_d2=b.fromType?b.e%24:b.e; ctx.fillText(toHHMM(_d1)+' – '+toHHMM(_d2),x+ps,y+pt+fs*2.35); }
       }
       ctx.restore();
     });
@@ -874,7 +882,8 @@ CF.init = function() {
         const ty=(parseFloat(by)+C.blockPadTop*zr+C.blockFontSize*zr).toFixed(2);
         const textCol=b.outlined?col:BG_COL;
         const safeTitle=b.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const safeTime=(toHHMM(b.s)+' \u2013 '+toHHMM(b.e)).replace(/&/g,'&amp;');
+        const _s=b.fromType?b.s%24:b.s,_e=b.fromType?b.e%24:b.e;
+        const safeTime=(toHHMM(_s)+' \u2013 '+toHHMM(_e)).replace(/&/g,'&amp;');
         const clipId='cl'+Math.round(parseFloat(bx))+'_'+Math.round(parseFloat(by));
         textEls=`<clipPath id="${clipId}"><rect x="${bx}" y="${by}" width="${w}" height="${h}" rx="${r}"/></clipPath>`+
           `<text x="${tx}" y="${ty}" font-family="'DM Sans',Arial,sans-serif" font-size="${fs}" font-weight="500" fill="${textCol}" fill-opacity="0.9" clip-path="url(#${clipId})">${safeTitle}</text>`;
@@ -908,7 +917,20 @@ CF.init = function() {
       if (!allCols.length) return CW/2 - 6*dw();
       return CW/2 - ((Math.max(...allCols)+1)/2)*dw();
     }
-    function originY() { return CH*C.verticalFocus - (13-HOUR_S)*hh(); }
+    function originY() {
+      if (isTypeMode && currentTypedText) {
+        const nLines = currentTypedText.split('\n').length;
+        const WIN = 24, GAP_HRS = WIN * C.lineGapRatio, STRIDE = WIN + GAP_HRS;
+        const totalHrs = (nLines - 1) * STRIDE + WIN; // full stack height
+        // Midpoint of the stack, measured from hour 0
+        const midHr = totalHrs / 2;
+        // We want hourToY(midHr) = CH * verticalFocus
+        // hourToY(h) = originY + (h - HOUR_S)*hh()
+        // → originY = CH*verticalFocus - (midHr - HOUR_S)*hh()
+        return CH * C.verticalFocus - (midHr - HOUR_S) * hh();
+      }
+      return CH * C.verticalFocus - (13 - HOUR_S) * hh();
+    }
     function colToX(c) { return originX()+c*dw(); }
     function hourToY(h) { return originY()+(h-HOUR_S)*hh(); }
     function xToCol(x)  { return Math.floor((x-originX())/dw()); }
@@ -985,7 +1007,8 @@ CF.init = function() {
       const timeRowY=b.renderY+PAD_TOP+fontSize+fontSize*1.35;
       if (timeRowY+fontSize<b.renderY+b.renderH-PAD_TOP*0.5) {
         p.fill(tr,tg,tb,160);
-        p.text(toHHMM(b.s)+' \u2013 '+toHHMM(b.e),b.renderX+PAD_SIDE,timeRowY);
+        const _ts=b.fromType?b.s%24:b.s,_te=b.fromType?b.e%24:b.e;
+        p.text(toHHMM(_ts)+' \u2013 '+toHHMM(_te),b.renderX+PAD_SIDE,timeRowY);
       }
       p.drawingContext.restore(); p.pop();
     }
@@ -1017,13 +1040,12 @@ CF.init = function() {
         drawLabel('09:00',yTop); drawLabel('17:00',yBot);
       }
       if (isTypeMode && currentTypedText) {
+        // Guide lines at 9am and 5pm of each line's 24hr window
         const nLines=currentTypedText.split('\n').length;
-        const LINE_HRS=GLYPH_SPAN, LINE_GAP=LINE_HRS*C.lineGapRatio;
-        const totalHrs=nLines*LINE_HRS+(nLines-1)*LINE_GAP;
-        const firstLineStart=(GLYPH_START+GLYPH_SPAN/2)-totalHrs/2;
+        const WIN=24, GAP_HRS=WIN*C.lineGapRatio, STRIDE=WIN+GAP_HRS;
         for (let li=0;li<nLines;li++) {
-          const tStart=firstLineStart+li*(LINE_HRS+LINE_GAP);
-          drawLinePair(hourToY(tStart),hourToY(tStart+LINE_HRS));
+          const shift=li*STRIDE;
+          drawLinePair(hourToY(GLYPH_START+shift),hourToY(GLYPH_END+shift));
         }
       } else {
         drawLinePair(hourToY(HOUR_S),hourToY(HOUR_E));
