@@ -666,38 +666,23 @@ CF.init = function() {
     currentTypedText = el ? el.value : currentTypedText;
     blocks = []; placeholderBlocks = [];
     const lines = currentTypedText.toUpperCase().split('\n');
-
-    // Each line is a full 24hr window. Glyphs keep their absolute hours (e.g. 9-17).
-    // Line 0: hours 0-24 (no shift — glyphs render at their saved times).
-    // Line 1: hours 24+GAP to 48+GAP (shift = 24 + GAP).
-    // GAP_HRS = visual space between windows = half a 24hr window = 12hrs.
-    // This means glyphs near the edges of their window can visually bleed
-    // into the adjacent line's space — intentional, they don't physically overlap.
-    const WIN = 24;                        // each line's hour window
-    const GAP_HRS = WIN * C.lineGapRatio;  // gap between windows (default: 12hrs)
-    const STRIDE = WIN + GAP_HRS;          // hours per line stride (default: 36)
-
+    const WIN = 24, GAP_HRS = WIN * C.lineGapRatio, STRIDE = WIN + GAP_HRS;
     const lineWidths = lines.map(l => lineColWidth(l));
     const maxCols = Math.max(...lineWidths, 1);
-
     lines.forEach((line, li) => {
-      const lineShift = li * STRIDE;  // line 0: 0, line 1: 36, line 2: 72 …
+      const lineShift = li * STRIDE;
       const offset = Math.ceil((maxCols - lineWidths[li]) / 2);
       let col = offset;
-
       for (const token of tokeniseLine(line)) {
         const glyph = token.glyph;
         if (token.type === 'space') {
           col += 1;
         } else if (glyph) {
-          // Shift glyph into this line's window — absolute hours preserved within window
           glyph.forEach(g => {
             const b = {
               d: col + g.relD,
-              s: g.relS + lineShift,
-              e: g.relE + lineShift,
-              _renderS: g.relS + lineShift,
-              _renderE: g.relE + lineShift,
+              s: g.relS + lineShift,   e: g.relE + lineShift,
+              _renderS: g.relS + lineShift, _renderE: g.relE + lineShift,
               _colorfulIdx: blocks.length,
               outlined: g.outlined || false,
               title: g.title || randTitle(),
@@ -708,7 +693,6 @@ CF.init = function() {
           });
           col += Math.max(...glyph.map(g => g.relD)) + 1;
         } else {
-          // Unknown char — placeholder spans 9-17 of this line's window
           placeholderBlocks.push({
             d: col,
             s: GLYPH_START + lineShift, e: GLYPH_END + lineShift,
@@ -922,13 +906,8 @@ CF.init = function() {
       if (isTypeMode && currentTypedText) {
         const nLines = currentTypedText.split('\n').length;
         const WIN = 24, GAP_HRS = WIN * C.lineGapRatio, STRIDE = WIN + GAP_HRS;
-        const totalHrs = (nLines - 1) * STRIDE + WIN; // full stack height
-        // Midpoint of the stack, measured from hour 0
-        const midHr = totalHrs / 2;
-        // We want hourToY(midHr) = CH * verticalFocus
-        // hourToY(h) = originY + (h - HOUR_S)*hh()
-        // → originY = CH*verticalFocus - (midHr - HOUR_S)*hh()
-        return CH * C.verticalFocus - (midHr - HOUR_S) * hh();
+        const totalHrs = (nLines - 1) * STRIDE + WIN;
+        return CH * C.verticalFocus - (totalHrs/2 - HOUR_S) * hh();
       }
       return CH * C.verticalFocus - (13 - HOUR_S) * hh();
     }
@@ -1041,9 +1020,8 @@ CF.init = function() {
         drawLabel('09:00',yTop); drawLabel('17:00',yBot);
       }
       if (isTypeMode && currentTypedText) {
-        // Guide lines at 9am and 5pm of each line's 24hr window
         const nLines=currentTypedText.split('\n').length;
-        const WIN=24, GAP_HRS=WIN*C.lineGapRatio, STRIDE=WIN+GAP_HRS;
+        const WIN=24,GAP_HRS=WIN*C.lineGapRatio,STRIDE=WIN+GAP_HRS;
         for (let li=0;li<nLines;li++) {
           const shift=li*STRIDE;
           drawLinePair(hourToY(GLYPH_START+shift),hourToY(GLYPH_END+shift));
