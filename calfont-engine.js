@@ -213,6 +213,7 @@ CF.init = function() {
   const BASE_DW = C.baseDayWidth;
   const BASE_HH = C.baseHourHeight;
   const GLYPH_START = HOUR_S;
+  const GLYPH_END   = HOUR_E;
   const GLYPH_SPAN  = HOUR_E - HOUR_S;
 
   // ── State ──────────────────────────────────────────────────
@@ -726,8 +727,8 @@ CF.init = function() {
     for (const [name, glyphs] of Object.entries(rawAlphabet)) {
       humanAlphabet[name] = (glyphs._human || glyphs).map(g => {
         if (g.col !== undefined) return g;
-        return { col: g.relD+1, from: toHHMM(GLYPH_START+g.relS*GLYPH_SPAN),
-                 to: toHHMM(GLYPH_START+g.relE*GLYPH_SPAN), title: g.title||'', outlined: g.outlined||false };
+        return { col: g.relD+1, from: toHHMM(g.relS),
+                 to: toHHMM(g.relE), title: g.title||'', outlined: g.outlined||false };
       });
     }
     const data = { version:2, note:"CalFont session", alphabet:humanAlphabet,
