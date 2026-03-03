@@ -666,7 +666,10 @@ CF.init = function() {
     currentTypedText = el ? el.value : currentTypedText;
     blocks = []; placeholderBlocks = [];
     const lines = currentTypedText.toUpperCase().split('\n');
-    const WIN = 24, GAP_HRS = WIN * C.lineGapRatio, STRIDE = WIN + GAP_HRS;
+    // STRIDE = GLYPH_SPAN * (1 + lineGapRatio) = 8 * 1.5 = 12hrs.
+    // This gives a content gap of GLYPH_SPAN * lineGapRatio = 4hrs
+    // between 17:00 of one line and 09:00 of the next.
+    const STRIDE = GLYPH_SPAN * (1 + C.lineGapRatio);
     const lineWidths = lines.map(l => lineColWidth(l));
     const maxCols = Math.max(...lineWidths, 1);
     lines.forEach((line, li) => {
@@ -683,6 +686,7 @@ CF.init = function() {
               d: col + g.relD,
               s: g.relS + lineShift,   e: g.relE + lineShift,
               _renderS: g.relS + lineShift, _renderE: g.relE + lineShift,
+              _origS: g.relS, _origE: g.relE,
               _colorfulIdx: blocks.length,
               outlined: g.outlined || false,
               title: g.title || randTitle(),
@@ -827,7 +831,7 @@ CF.init = function() {
         ctx.fillStyle=b.outlined?col:BG_COL; ctx.globalAlpha=0.9;
         ctx.beginPath(); ctx.roundRect(x,y,w,h,rad); ctx.clip();
         ctx.fillText(b.title,x+ps,y+pt+fs);
-        if (b.e-b.s>0.5) { ctx.globalAlpha=0.65; const _d1=b.fromType?b.s%24:b.s,_d2=b.fromType?b.e%24:b.e; ctx.fillText(toHHMM(_d1)+' – '+toHHMM(_d2),x+ps,y+pt+fs*2.35); }
+        if (b.e-b.s>0.5) { ctx.globalAlpha=0.65; const _d1=b._origS!=null?b._origS:b.s,_d2=b._origE!=null?b._origE:b.e; ctx.fillText(toHHMM(_d1)+' – '+toHHMM(_d2),x+ps,y+pt+fs*2.35); }
       }
       ctx.restore();
     });
@@ -867,7 +871,7 @@ CF.init = function() {
         const ty=(parseFloat(by)+C.blockPadTop*zr+C.blockFontSize*zr).toFixed(2);
         const textCol=b.outlined?col:BG_COL;
         const safeTitle=b.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const _s=b.fromType?b.s%24:b.s,_e=b.fromType?b.e%24:b.e;
+        const _s=b._origS!=null?b._origS:b.s,_e=b._origE!=null?b._origE:b.e;
         const safeTime=(toHHMM(_s)+' \u2013 '+toHHMM(_e)).replace(/&/g,'&amp;');
         const clipId='cl'+Math.round(parseFloat(bx))+'_'+Math.round(parseFloat(by));
         textEls=`<clipPath id="${clipId}"><rect x="${bx}" y="${by}" width="${w}" height="${h}" rx="${r}"/></clipPath>`+
@@ -905,9 +909,10 @@ CF.init = function() {
     function originY() {
       if (isTypeMode && currentTypedText) {
         const nLines = currentTypedText.split('\n').length;
-        const WIN = 24, GAP_HRS = WIN * C.lineGapRatio, STRIDE = WIN + GAP_HRS;
-        const totalHrs = (nLines - 1) * STRIDE + WIN;
-        return CH * C.verticalFocus - (totalHrs/2 - HOUR_S) * hh();
+        const STRIDE = GLYPH_SPAN * (1 + C.lineGapRatio);
+        const totalContent = (nLines - 1) * STRIDE + GLYPH_SPAN;
+        const midHr = GLYPH_START + totalContent / 2;
+        return CH * C.verticalFocus - (midHr - HOUR_S) * hh();
       }
       return CH * C.verticalFocus - (13 - HOUR_S) * hh();
     }
@@ -987,7 +992,7 @@ CF.init = function() {
       const timeRowY=b.renderY+PAD_TOP+fontSize+fontSize*1.35;
       if (timeRowY+fontSize<b.renderY+b.renderH-PAD_TOP*0.5) {
         p.fill(tr,tg,tb,160);
-        const _ts=b.fromType?b.s%24:b.s,_te=b.fromType?b.e%24:b.e;
+        const _ts=b._origS!=null?b._origS:b.s,_te=b._origE!=null?b._origE:b.e;
         p.text(toHHMM(_ts)+' \u2013 '+toHHMM(_te),b.renderX+PAD_SIDE,timeRowY);
       }
       p.drawingContext.restore(); p.pop();
@@ -1021,7 +1026,7 @@ CF.init = function() {
       }
       if (isTypeMode && currentTypedText) {
         const nLines=currentTypedText.split('\n').length;
-        const WIN=24,GAP_HRS=WIN*C.lineGapRatio,STRIDE=WIN+GAP_HRS;
+        const STRIDE=GLYPH_SPAN*(1+C.lineGapRatio);
         for (let li=0;li<nLines;li++) {
           const shift=li*STRIDE;
           drawLinePair(hourToY(GLYPH_START+shift),hourToY(GLYPH_END+shift));
