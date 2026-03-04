@@ -108,6 +108,45 @@ window.CF.tones = {
     ]
   },
 
+  VACATION: {
+    label: 'VACATION',
+titles: [
+  'Morning Espresso',
+  'Aperol Spritz Break',
+  'Gelato Research',
+  'Roman Sunset Walk',
+  'Pasta Quality Control',
+  'Vespa City Ride',
+  'Antipasti Hour',
+  'Colosseum Stroll',
+  'Trastevere Wandering',
+  'Dolce Vita Time',
+  'Pizza Tasting',
+  'Market in Campo',
+  'Tiramisu Evaluation',
+  'Wine in Monti',
+  'Roman Holiday',
+  'Fountain Coin Toss',
+  'Golden Hour Piazza',
+  'Olive Oil Sampling',
+  'Panini Lunch Break',
+  'Lazy Roman Afternoon',
+  'Balcony Espresso',
+  'Evening Aperitivo',
+  'Secret Gelato Spot',
+  'Roaming Roman Streets',
+  'Lunch in Trastevere',
+  'Sunset over Tiber',
+  'Spritz with Friends',
+  'Vatican Day Off',
+  'Cappuccino & Cornetto',
+  'Late Night Carbonara'
+  'Get Dream-job offer'
+]
+  },
+
+
+  
   // ── ADD NEW TONES BELOW ───────────────────────────────────────────────────
   //
   // Example:
