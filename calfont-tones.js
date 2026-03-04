@@ -140,8 +140,8 @@ titles: [
   'Spritz with Friends',
   'Vatican Day Off',
   'Cappuccino & Cornetto',
-  'Late Night Carbonara'
-  'Get Dream-job offer'
+  'Late Night Carbonara',
+  'Get Dream-job offer',
 ]
   },
 
