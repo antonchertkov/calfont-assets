@@ -60,25 +60,9 @@ CF.config = {
   palette: ['#7A86CB','#E67D73','#AD1457','#8E24AA','#00897B','#039BE5','#F4511E','#33B679'],
   bgColor: '#D9D9D9',   // canvas background = also used as block text/separator color
 
-  toneLabels: ['STANDARD','HOPEFUL','PARODY'],
-  toneTitles: {
-    STANDARD: ['Check-In with Client','Kick-off','Alignment with Steve','Sprint Workshop',
-      'Team Introduction','Standup','Quarterly Review','1:1 with Manager','Product Sync',
-      'Stakeholder Update','Design Review','All Hands','Retro','Planning Session','Client Call',
-      'Strategy Meeting','OKR Review','Onboarding','Tech Deep Dive','Brand Alignment',
-      'Budget Review','Roadmap Sync','Feasibility Workshop'],
-    HOPEFUL:  ['Me Time','Taking a Break','Going for a Walk','Coffee Date','Gym',
-      'Working from Home','Read a Book','Lunch with a Friend','No Meetings Please',
-      'Focus Block','Digital Detox','Creative Time','Mindful Moment','Fresh Air','Power Nap',
-      'Garden Break','Journaling','Cook Something Nice','Call Mum','Do Nothing','Stretch Break',
-      'Bike Ride','Long Lunch'],
-    PARODY:   ['Go Cry','Ignoring Slack Messages','Not Available','Browse LinkedIn for New Job',
-      'Important Smoke Break','Pretend to Work','Stare at Wall','Avoid Everyone','Fake Commute',
-      'Reply Later (Never)','Doomscrolling','Apply to 10 Jobs','Question Life Choices',
-      'Rethink Career','Be Perceived','Touch Grass','Existential Lunch','Hide in Bathroom',
-      'Update CV Again','Cry but Make it Scrum','Silent Resignation','Ctrl+Z My Career',
-      'Out of Office (Forever)']
-  },
+  toneLabels: [],  // populated from calfont-tones.js
+  toneTitles: {},   // populated from calfont-tones.js
+
 
   // ── Preset glyphs (the default alphabet shipped with the tool) ────────────
   presetAlphabet: {}  // populated from calfont-presets.js if loaded, else empty
@@ -270,7 +254,7 @@ CF.init = function() {
   }
 
   // ── Text helpers ───────────────────────────────────────────
-  const TONE_KEYS = ['STANDARD','HOPEFUL','PARODY'];
+  const TONE_KEYS = C.toneLabels;
   function randTitle() {
     const list = C.toneTitles[TONE_KEYS[toneMode]];
     return list[Math.floor(Math.random() * list.length)];
@@ -374,6 +358,43 @@ CF.init = function() {
   }
 
   // ── Presets ────────────────────────────────────────────────
+  function loadTones() {
+    // CF.tones is set by calfont-tones.js (loaded before engine).
+    // Falls back to built-in defaults if file not present.
+    const DEFAULT_TONES = {
+      STANDARD: {
+        label: 'STANDARD',
+        titles: ['Check-In with Client','Kick-off','Alignment with Steve','Sprint Workshop',
+          'Team Introduction','Standup','Quarterly Review','1:1 with Manager','Product Sync',
+          'Stakeholder Update','Design Review','All Hands','Retro','Planning Session','Client Call',
+          'Strategy Meeting','OKR Review','Onboarding','Tech Deep Dive','Brand Alignment',
+          'Budget Review','Roadmap Sync','Feasibility Workshop']
+      },
+      HOPEFUL: {
+        label: 'HOPEFUL',
+        titles: ['Me Time','Taking a Break','Going for a Walk','Coffee Date','Gym',
+          'Working from Home','Read a Book','Lunch with a Friend','No Meetings Please',
+          'Focus Block','Digital Detox','Creative Time','Mindful Moment','Fresh Air','Power Nap',
+          'Garden Break','Journaling','Cook Something Nice','Call Mum','Do Nothing','Stretch Break',
+          'Bike Ride','Long Lunch']
+      },
+      PARODY: {
+        label: 'PARODY',
+        titles: ['Go Cry','Ignoring Slack Messages','Not Available','Browse LinkedIn for New Job',
+          'Important Smoke Break','Pretend to Work','Stare at Wall','Avoid Everyone','Fake Commute',
+          'Reply Later (Never)','Doomscrolling','Apply to 10 Jobs','Question Life Choices',
+          'Rethink Career','Be Perceived','Touch Grass','Existential Lunch','Hide in Bathroom',
+          'Update CV Again','Cry but Make it Scrum','Silent Resignation','Ctrl+Z My Career',
+          'Out of Office (Forever)']
+      }
+    };
+    const source = (window.CF && window.CF.tones) ? window.CF.tones : DEFAULT_TONES;
+    const keys = Object.keys(source);
+    C.toneLabels = keys.map(k => source[k].label || k);
+    C.toneTitles = {};
+    keys.forEach(k => { C.toneTitles[k] = source[k].titles; });
+  }
+
   function loadPresets() {
     // CF.presets is populated by calfont-presets.js (loaded before this file).
     // Falls back to C.presetAlphabet if the external file isn't present.
@@ -653,7 +674,7 @@ CF.init = function() {
   }
 
   function rotateTone() {
-    toneMode = (toneMode + 1) % 3;
+    toneMode = (toneMode + 1) % TONE_KEYS.length;
     const lbl = q(H.toneLabel);
     if (lbl) lbl.textContent = C.toneLabels[toneMode];
     blocks.forEach(b => b.title = randTitle());
@@ -1318,6 +1339,7 @@ CF.init = function() {
   })();
 
   // ── Init ──────────────────────────────────────────────────
+  loadTones();
   loadPresets();
   updatePaletteUI();
   const lbl=q(H.toneLabel); if(lbl) lbl.textContent=C.toneLabels[toneMode];
