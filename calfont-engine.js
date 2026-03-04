@@ -254,10 +254,10 @@ CF.init = function() {
   }
 
   // ── Text helpers ───────────────────────────────────────────
-  const TONE_KEYS = C.toneLabels;
   function randTitle() {
-    const list = C.toneTitles[TONE_KEYS[toneMode]];
-    return list[Math.floor(Math.random() * list.length)];
+    const key = C.toneLabels[toneMode];
+    const list = C.toneTitles[key] || [];
+    return list.length ? list[Math.floor(Math.random() * list.length)] : '';
   }
   function toHHMM(h) {
     const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
@@ -674,7 +674,7 @@ CF.init = function() {
   }
 
   function rotateTone() {
-    toneMode = (toneMode + 1) % TONE_KEYS.length;
+    toneMode = (toneMode + 1) % C.toneLabels.length;
     const lbl = q(H.toneLabel);
     if (lbl) lbl.textContent = C.toneLabels[toneMode];
     blocks.forEach(b => b.title = randTitle());
