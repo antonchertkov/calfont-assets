@@ -1540,4 +1540,4 @@ window.CF.presets = {
         "outlined": false
       }
     ]
-  },
+  };
