@@ -17,13 +17,10 @@
 // No engine changes needed.
 //
 
+
 window.CF = window.CF || {};
 
 window.CF.presets = {
-{
-  "version": 2,
-  "note": "CalFont session",
-  "alphabet": {
     "H": [
       {
         "col": 1,
