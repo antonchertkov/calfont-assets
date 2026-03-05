@@ -1544,7 +1544,3 @@ window.CF.presets = {
       }
     ]
   },
-  "typedText": "Relax",
-  "paletteStep": 10,
-  "toneMode": 0
-}
