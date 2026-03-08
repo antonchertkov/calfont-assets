@@ -125,6 +125,11 @@ CF.hooks = {
   exportSvgBtn:     '#cf-export-svg',  // click → open export modal (SVG)
   exportPngBtn:     '#cf-export-png',  // click → open export modal (PNG)
   sessionBtn:       '#cf-session-btn', // click → open save/load modal
+  calExportBtn:     '#cf-cal-export-btn', // click → open calendar export modal
+  calModal:         '#cf-cal-modal',       // calendar export modal wrapper
+  calDateInput:     '#cf-cal-date',         // date picker input
+  calConfirmBtn:    '#cf-cal-confirm',      // click → download .ics
+  calCloseBtns:     '.cf-close-cal',        // click → close calendar modal
 
   // ── Export modal (can be any overlay element) ─────────────
   exportModal:      '#cf-export-modal',        // the modal wrapper
@@ -731,6 +736,71 @@ CF.init = function() {
   }
 
   // ── Save / Load ────────────────────────────────────────────
+  function showCalExport() {
+    if (!blocks.length && !currentTypedText) { toast('Nothing on canvas to export'); return; }
+    openModal(H.calModal);
+    // Default to next Monday
+    const d = new Date();
+    d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7));
+    const iso = d.toISOString().slice(0,10);
+    const inp = q(H.calDateInput);
+    if (inp && !inp.value) inp.value = iso;
+  }
+
+  function downloadICS() {
+    const inp = q(H.calDateInput);
+    if (!inp || !inp.value) { toast('Please pick a start date'); return; }
+    const [yr, mo, dy] = inp.value.split('-').map(Number);
+
+    // Collect all visible blocks (make mode: blocks array; test mode: same)
+    const allBlocks = [...blocks];
+    if (!allBlocks.length) { toast('No blocks to export'); return; }
+
+    function pad2(n) { return String(n).padStart(2,'0'); }
+    function icsDate(col, hourFloat) {
+      // col = day offset (0-based), hourFloat = e.g. 9.5 = 09:30
+      const base = new Date(yr, mo-1, dy + col);
+      const hh = Math.floor(hourFloat);
+      const mm = Math.round((hourFloat - hh) * 60);
+      return `${base.getFullYear()}${pad2(base.getMonth()+1)}${pad2(base.getDate())}T${pad2(hh)}${pad2(mm)}00`;
+    }
+    function escICS(s) { return (s||'').replace(/[\\,;]/g, c => '\\'+c).replace(/\n/g,'\\n'); }
+
+    const uid_base = Date.now();
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//CalFont//CalFont Export//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+    ];
+
+    allBlocks.forEach((b, i) => {
+      const col  = b.d || 0;
+      const s    = b._origS != null ? b._origS : b.s;
+      const e    = b._origE != null ? b._origE : b.e;
+      const title = escICS(b.title || 'CalFont Event');
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:calfont-${uid_base}-${i}@calfont`,
+        `DTSTART:${icsDate(col, s)}`,
+        `DTEND:${icsDate(col, e)}`,
+        `SUMMARY:${title}`,
+        'END:VEVENT'
+      );
+    });
+
+    lines.push('END:VCALENDAR');
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'calfont-events.ics';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    closeModal(H.calModal);
+    toast('Calendar file downloaded');
+  }
+
   function showSaveLoad() {
     const humanAlphabet = {};
     for (const [name, glyphs] of Object.entries(rawAlphabet)) {
@@ -1287,7 +1357,10 @@ CF.init = function() {
   on(H.toneBtn,        'click', rotateTone);
   on(H.exportSvgBtn,   'click', ()=>openExportModal('svg'));
   on(H.exportPngBtn,   'click', ()=>openExportModal('png'));
+  on(H.calExportBtn,   'click', showCalExport);
   on(H.sessionBtn,     'click', showSaveLoad);
+  on(H.calConfirmBtn,  'click', downloadICS);
+  onAll(H.calCloseBtns,'click', ()=>closeModal(H.calModal));
   on(H.exportConfirmBtn,'click', runExport);
   on(H.tabSave,        'click', ()=>showTab('save'));
   on(H.tabLoad,        'click', ()=>showTab('load'));
