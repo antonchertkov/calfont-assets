@@ -652,7 +652,7 @@
   <!-- Toast notification -->
   <div id="cf-toast" class="tools-cf-toast"><p>Text</p></div>
 
-  <!-- Top menu bar: Save / Instructions / About -->
+  <!-- Top menu bar: Save / Controls / About -->
   <div class="tools-cf-wrapper-menu">
     <div id="cf-top-bar" class="tools-cf-div-menu">
       <a id="cf-session-btn" href="#" class="cf-top-btn">
@@ -660,7 +660,7 @@
       </a>
       <div class="txt-white">/</div>
       <a id="cf-menu-btn-controls" href="#" class="cf-top-btn">
-        <div class="tools-cf-txt-h5-menu">Instructions</div>
+        <div class="tools-cf-txt-h5-menu">Controls</div>
       </a>
       <div class="txt-white">/</div>
       <a id="cf-menu-btn-about" href="#" class="cf-top-btn">
@@ -3838,6 +3838,7 @@ ${blockEls}
     p.setup = function() {
       const wrap = document.getElementById(C.canvasContainerId);
       CW = wrap.offsetWidth; CH = wrap.offsetHeight;
+      p.pixelDensity(window.devicePixelRatio || 1);
       const cnv = p.createCanvas(CW, CH);
       cnv.parent(C.canvasContainerId);
       canvasEl = cnv.elt; // cache DOM element for cursor control

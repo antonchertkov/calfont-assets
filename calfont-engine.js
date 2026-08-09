@@ -194,7 +194,7 @@ CF.init = function() {
   const BG_NUM    = parseInt(BG_COL.slice(1),16);
   const BGr = (BG_NUM>>16)&255, BGg = (BG_NUM>>8)&255, BGb = BG_NUM&255;
   const PALETTE_SETS = [
-    [0,1,2,3],[1,2,3,4],[2,3,4,5],[3,4,5,6] // colorful sets
+    [4,3,2,5],[5,0,7,4],[6,1,7,5],[6,3,2,5] // colorful sets
   ];
   const PALETTE_TOTAL = PALETTE.length * 2 + PALETTE_SETS.length;
   const HOUR_S  = C.workDayStart;
@@ -505,6 +505,8 @@ CF.init = function() {
     const state = getPaletteState();
     updateModePillColor(state.mode !== 'colorful' ? PALETTE[state.palIdx] : null);
     if (isTypeMode) renderTypedText();
+    // Notify 3D renderer of mode change
+    try { if (window.CF3D && CF3D.onModeChange) CF3D.onModeChange(!isTypeMode); } catch(_) {}
   }
 
   // ── Glyph management ───────────────────────────────────────
@@ -671,11 +673,24 @@ CF.init = function() {
   }
 
   // ── Palette / Tone ────────────────────────────────────────
+  function saveTitleMap() {
+    const m = {};
+    blocks.forEach(b => { if (b.title) m[`${b.d},${b.s},${b.e}`] = b.title; });
+    return m;
+  }
+  function restoreTitleMap(m) {
+    blocks.forEach(b => { const t = m[`${b.d},${b.s},${b.e}`]; if (t) b.title = t; });
+  }
+
   function advancePalette() {
     paletteStep = (paletteStep + 1) % PALETTE_TOTAL;
     updatePaletteUI();
     blocks.forEach((b, i) => applyStyle(b, i, true));
-    if (isTypeMode) renderTypedText();
+    if (isTypeMode) {
+      const saved = saveTitleMap();
+      renderTypedText();
+      restoreTitleMap(saved);
+    }
   }
 
   function rotateTone() {
@@ -867,6 +882,20 @@ CF.init = function() {
   // ── Export ─────────────────────────────────────────────────
   function openExportModal(fmt) {
     if (!blocks.length) { toast('Nothing to export'); return; }
+
+    // In 3D view: SVG not available; PNG becomes a JPEG screenshot of the 3D scene.
+    if (window.CF3D && window.CF3D.isOpen()) {
+      if (fmt === 'svg') { toast('SVG export is not available in 3D view'); return; }
+      // PNG button → 3D JPEG (bypass the options modal — no stroke/type toggles apply)
+      const canvas = window.CF3D.renderExport3D();
+      if (!canvas) { toast('Nothing to export'); return; }
+      const dataURL = canvas.toDataURL('image/jpeg', 0.93);
+      const a = document.createElement('a'); a.href = dataURL; a.download = 'calfont.jpg';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      toast('calfont.jpg @2x downloaded');
+      return;
+    }
+
     _exportFormat = fmt;
     const t = q(H.exportModalTitle);
     if (t) t.textContent = fmt === 'svg' ? 'Export SVG' : 'Export PNG';
@@ -914,7 +943,6 @@ CF.init = function() {
         ctx.fillStyle=BG_COL; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=C.blockStroke*zoom; ctx.stroke();
       } else {
         ctx.fillStyle=col; ctx.fill();
-        if (b._exportStroke) { ctx.strokeStyle=BG_COL; ctx.lineWidth=C.blockStroke*zoom; ctx.stroke(); }
       }
       if (b._exportType && b.title) {
         const fs=C.blockFontSize*zoom, ps=C.blockPadSide*zoom, pt=C.blockPadTop*zoom;
@@ -943,38 +971,84 @@ CF.init = function() {
     });
     const PAD=24, svgW=maxX-minX+PAD*2, svgH=maxY-minY+PAD*2;
     const sorted=[...allBlocks].filter(b=>b.renderX!=null).sort((a,b)=>(a.renderX||0)-(b.renderX||0));
-    const BASE_RADIUS=C.blockRadius, zr=zoom;
-    const rects=sorted.map(b => {
-      const bx=(b.renderX-minX+PAD).toFixed(2), by=(b.renderY-minY+PAD).toFixed(2);
-      const w=b.renderW.toFixed(2), h=b.renderH.toFixed(2), r=(BASE_RADIUS*zr).toFixed(2);
+    const zr=zoom;
+
+    // Group blocks by glyph (column d + line index) in type mode,
+    // or treat each block as its own group in make mode.
+    // Structure: letter group > block group > rect + texts
+    // No clipPaths — use nested <svg> with overflow=hidden for text clipping.
+    // Result in Figma: one group per letter, one group per block,
+    // each block group has exactly: background rect, title text, time text.
+
+    function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function blockToSVG(b, idx) {
+      const bx=(b.renderX-minX+PAD).toFixed(2);
+      const by=(b.renderY-minY+PAD).toFixed(2);
+      const w=b.renderW.toFixed(2), h=b.renderH.toFixed(2);
+      const r=(C.blockRadius*zr).toFixed(2);
       const col=blockColor(b);
+      const fs=(C.blockFontSize*zr).toFixed(2);
+      const padS=(C.blockPadSide*zr).toFixed(2);
+      const padT=(C.blockPadTop*zr).toFixed(2);
+      const textCol=b.outlined?col:BG_COL;
+      const sw=(C.blockStroke*zr).toFixed(2);
+
+      // Background rect
       let rectEl;
       if (b.outlined) {
-        rectEl=`<rect x="${bx}" y="${by}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${BG_COL}" stroke="${col}" stroke-width="${(C.blockStroke*zr).toFixed(2)}"/>`;
+        rectEl=`<rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${BG_COL}" stroke="${col}" stroke-width="${sw}"/>`;
       } else {
-        const sa=b._exportStroke?` stroke="${BG_COL}" stroke-width="${(C.blockStroke*zr).toFixed(2)}"`:'';
-        rectEl=`<rect x="${bx}" y="${by}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${col}"${sa}/>`;
+        rectEl=`<rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${col}"/>`;
       }
+
+      // Text elements — only if type export enabled and block tall enough
       let textEls='';
       if (b._exportType && b.title) {
-        const fs=(C.blockFontSize*zr).toFixed(2);
-        const tx=(parseFloat(bx)+C.blockPadSide*zr).toFixed(2);
-        const ty=(parseFloat(by)+C.blockPadTop*zr+C.blockFontSize*zr).toFixed(2);
-        const textCol=b.outlined?col:BG_COL;
-        const safeTitle=b.title.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const _s=b._origS!=null?b._origS:b.s,_e=b._origE!=null?b._origE:b.e;
-        const safeTime=(toHHMM(_s)+' \u2013 '+toHHMM(_e)).replace(/&/g,'&amp;');
-        const clipId='cl'+Math.round(parseFloat(bx))+'_'+Math.round(parseFloat(by));
-        textEls=`<clipPath id="${clipId}"><rect x="${bx}" y="${by}" width="${w}" height="${h}" rx="${r}"/></clipPath>`+
-          `<text x="${tx}" y="${ty}" font-family="'DM Sans',Arial,sans-serif" font-size="${fs}" font-weight="500" fill="${textCol}" fill-opacity="0.9" clip-path="url(#${clipId})">${safeTitle}</text>`;
+        const tx=parseFloat(padS).toFixed(2);
+        const ty=(parseFloat(padT)+parseFloat(fs)).toFixed(2);
+        const safeTitle=esc(b.title);
+        const _s=b._origS!=null?b._origS:b.s, _e=b._origE!=null?b._origE:b.e;
+        const safeTime=esc(toHHMM(_s)+' – '+toHHMM(_e));
+        textEls+=`\n    <text x="${tx}" y="${ty}" font-family="'DM Sans',Arial,sans-serif" font-size="${fs}" font-weight="500" fill="${textCol}" fill-opacity="0.9">${safeTitle}</text>`;
         if (b.e-b.s>0.5) {
-          const ty2=(parseFloat(ty)+C.blockFontSize*zr*1.35).toFixed(2);
-          textEls+=`<text x="${tx}" y="${ty2}" font-family="'DM Sans',Arial,sans-serif" font-size="${fs}" fill="${textCol}" fill-opacity="0.65" clip-path="url(#${clipId})">${safeTime}</text>`;
+          const ty2=(parseFloat(ty)+parseFloat(fs)*1.35).toFixed(2);
+          textEls+=`\n    <text x="${tx}" y="${ty2}" font-family="'DM Sans',Arial,sans-serif" font-size="${fs}" fill="${textCol}" fill-opacity="0.65">${safeTime}</text>`;
         }
       }
-      return rectEl+textEls;
-    }).join('\n  ');
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${svgW.toFixed(0)}" height="${svgH.toFixed(0)}" viewBox="0 0 ${svgW.toFixed(0)} ${svgH.toFixed(0)}">\n  ${rects}\n</svg>`;
+
+      // Each block = one <g> translated to position.
+      // Inner <svg> clips text to block bounds without a clipPath element.
+      return `  <g id="block-${idx}" transform="translate(${bx},${by})">\n` +
+             `    <svg width="${w}" height="${h}" overflow="hidden">\n` +
+             `    ${rectEl}${textEls}\n` +
+             `    </svg>\n` +
+             `  </g>`;
+    }
+
+    let svgContent;
+    if (isTypeMode && currentTypedText) {
+      // Group blocks by letter position (column d + line)
+      const STRIDE = GLYPH_SPAN * (1 + C.lineGapRatio);
+      const groups = new Map();
+      sorted.forEach((b, idx) => {
+        const li = b._origS != null ? Math.round((b.s - b._origS) / STRIDE) : 0;
+        const key = `${li}_${b.d}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({b, idx});
+      });
+      const letterGroups = [...groups.entries()].map(([key, items], gi) => {
+        const blockEls = items.map(({b, idx}) => blockToSVG(b, idx)).join('\n');
+        return `<g id="letter-${gi}">
+${blockEls}
+</g>`;
+      });
+      svgContent = letterGroups.join('\n');
+    } else {
+      svgContent = sorted.map((b, idx) => blockToSVG(b, idx)).join('\n');
+    }
+
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${svgW.toFixed(0)}" height="${svgH.toFixed(0)}" viewBox="0 0 ${svgW.toFixed(0)} ${svgH.toFixed(0)}">\n${svgContent}\n</svg>`;
     const b64=btoa(unescape(encodeURIComponent(svg)));
     const a=document.createElement('a'); a.href='data:image/svg+xml;base64,'+b64; a.download='calfont.svg';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -1151,6 +1225,7 @@ CF.init = function() {
     p.setup = function() {
       const wrap = document.getElementById(C.canvasContainerId);
       CW = wrap.offsetWidth; CH = wrap.offsetHeight;
+      p.pixelDensity(window.devicePixelRatio || 1);
       const cnv = p.createCanvas(CW, CH);
       cnv.parent(C.canvasContainerId);
       canvasEl = cnv.elt; // cache DOM element for cursor control
@@ -1187,12 +1262,42 @@ CF.init = function() {
 
     p.mouseWheel = function(e) {
       if (document.querySelector('.cf-modal-open')) return;
+      // In 3D test mode the overlay owns scroll for camera zoom.
+      // In 3D Make mode allow p5 zoom through — it scales the glyph and 3D syncs.
+      if (window.CF3D && window.CF3D.isOpen() && !window.CF3D.isMakeMode()) return false;
       zoom-=e.delta*C.zoomStep;
       zoom=Math.max(C.zoomMin,Math.min(C.zoomMax,zoom));
       return false;
     };
 
     p.draw = function() {
+      // Expose origin to CF.getSnapshot (which lives outside this closure).
+      CF._ox = originX();
+      CF._oy = originY();
+      // Expose interaction state — 3D uses this to switch to 60fps rebuild during gestures.
+      CF._interacting = !isTypeMode && !!(dragging || resizing || isCreating);
+      CF._zoom = zoom;
+      // Expose live ghost rect for 3D renderer — updated every frame while dragging.
+      if (!isTypeMode && isCreating) {
+        const sh = snapHour(createY0), eh = snapHour(p.mouseY);
+        if (sh !== eh) {
+          const canvasEl = p5ref ? p5ref.elt : null;
+          const cr = canvasEl ? canvasEl.getBoundingClientRect() : { left: 0, top: 0 };
+          const d = xToCol(createX0), gx = colToX(d);
+          const y1 = hourToY(Math.min(sh, eh)), y2 = hourToY(Math.max(sh, eh));
+          CF._ghostRect = {
+            rx: cr.left + gx + 1,
+            ry: cr.top  + y1,
+            rw: dw() - 11,
+            rh: y2 - y1,
+            color: PALETTE[getPaletteState().palIdx || 0]
+          };
+        } else {
+          CF._ghostRect = null;
+        }
+      } else {
+        CF._ghostRect = null;
+      }
       drawGrid();
       // Gradient overlay — bottom fraction, grid lines behind it
       p.push(); p.noStroke();
@@ -1259,7 +1364,9 @@ CF.init = function() {
       drawPlaceholders();
 
       // ── Cursor feedback & nub highlight ──────────────────────────
-      if (!isTypeMode && !dragging && !resizing && !isCreating) {
+      if (isTypeMode) {
+        if(canvasEl) canvasEl.style.cursor='';
+      } else if (!dragging && !resizing && !isCreating) {
         const sorted=[...blocks].filter(b=>b.renderW!=null).sort((a,b)=>(b.renderX||0)-(a.renderX||0));
         let cursor='crosshair'; // default: drawing mode
         let nubHoverBlock=null;
@@ -1420,5 +1527,53 @@ CF.init = function() {
   const inp=q(H.typeInput);
   if (inp) { inp.value=C.defaultText; currentTypedText=C.defaultText; }
   renderTypedText();
+
+
+  // ── 3D renderer bridge ────────────────────────────────────
+  // Returns a plain-data snapshot of all currently rendered blocks.
+  // Called by calfont-3d.js when entering 3D view.
+  CF.getSnapshot = function() {
+    const rendered = blocks.filter(b => b.renderX != null);
+    // Normalise to zoom=1 so the 3D renderer is independent of the 2D zoom level.
+    // renderX includes originX() which is CW/2 - 6*dw(). Simply dividing by zoom
+    // leaves a CW/(2*zoom) residual that shifts with zoom. Fix: subtract the
+    // origin (written into CF._ox/_oy by p.draw each frame, since originX/Y live
+    // inside the p5 sketch closure and can't be called from here directly).
+    const z  = zoom || 1;
+    const ox = CF._ox != null ? CF._ox : 0;
+    const oy = CF._oy != null ? CF._oy : 0;
+    // Canvas offset in viewport — needed for viewport-space positioning in 3D
+    const canvasEl   = p5ref ? p5ref.elt : null;
+    const canvasRect = canvasEl ? canvasEl.getBoundingClientRect() : { left: 0, top: 0 };
+    return {
+      blocks: rendered.map(b => ({
+        // Zoom=1 normalised coords — used for layer assignment
+        x:  (b.renderX - ox) / z,
+        y:  (b.renderY - oy) / z,
+        w:  b.renderW / z,
+        h:  b.renderH / z,
+        // Raw viewport-space coords — used for 2D-matched initial positioning
+        rx: b.renderX + canvasRect.left,
+        ry: b.renderY + canvasRect.top,
+        rw: b.renderW,
+        rh: b.renderH,
+        color:   blockColor(b),
+        title:   b.title  || '',
+        s:       b._origS != null ? b._origS : b.s,
+        e:       b._origE != null ? b._origE : b.e,
+        outlined: !!b.outlined
+      })),
+      bgColor:    C.bgColor,
+      canvasW:    p5ref ? p5ref.width  : window.innerWidth,
+      canvasH:    p5ref ? p5ref.height : window.innerHeight,
+      zoom:       z,
+      isMakeMode: !isTypeMode,
+      // Column guide data — viewport x of column-0 left edge + per-column width
+      colWidthPx: C.baseDayWidth * z,
+      originVX:   canvasRect.left + (CF._ox != null ? CF._ox : 0),
+      canvasVY:   canvasRect.top,
+      canvasVH:   p5ref ? p5ref.height : window.innerHeight
+    };
+  };
 
 }; // end CF.init
